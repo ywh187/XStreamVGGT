@@ -31,7 +31,7 @@ import utils.misc as misc
 from utils.misc import NativeScalerWithGradNormCount as NativeScaler
 from models.croco import CroCoNet
 from models.criterion import MaskedMSE
-from datasets.pairs_dataset import PairsDataset
+from ywh_datasets.pairs_dataset import PairsDataset
 
 
 def get_args_parser():

@@ -28,7 +28,8 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 print("Initializing and loading StreamVGGT model...")
 
-local_ckpt_path = "ckpt/checkpoints.pth"
+local_ckpt_path = "./ckpt/model.pt" #"ckpt/checkpoints.pth"
+
 if os.path.exists(local_ckpt_path):
     print(f"Loading local checkpoint from {local_ckpt_path}")
     model = StreamVGGT()
@@ -97,6 +98,7 @@ def run_model(target_dir, model) -> dict:
     print("Running inference...")
     dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
 
+    
     with torch.no_grad():
         with torch.cuda.amp.autocast(dtype=dtype):
             output = model.inference(frames)

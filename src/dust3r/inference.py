@@ -84,10 +84,11 @@ def loss_of_one_batch(
     if symmetrize_batch:
         batch = make_batch_symmetric(batch)
     if "valid_mask" in batch[0]: 
-        query_pts = sample_query_points(batch[0]['valid_mask'], M=64).to(device=batch[0]["img"].device)
+        query_pts = sample_query_points(batch[0]['valid_mask'], M=64).to(device=batch[0]["img"].device) # torch.Size([1, 64, 2])
     else: 
         query_pts = None
     dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+    # import pdb; pdb.set_trace()
     with torch.cuda.amp.autocast(dtype=dtype):
         if inference:
             with torch.no_grad():
@@ -96,11 +97,13 @@ def loss_of_one_batch(
                 result = dict(views=batch, pred=preds)
                 return result[ret] if ret else result
         else:
-            output = model(batch, query_pts)
+            # import pdb; pdb.set_trace()
+            output = model(batch, query_pts) # 
             preds, batch = output.ress, output.views
 
         if teacher is not None:
             with torch.no_grad():
+                # import pdb; pdb.set_trace()
                 knowledge = teacher.inference(batch, query_pts)
                 gts, batch = knowledge.ress, knowledge.views
 

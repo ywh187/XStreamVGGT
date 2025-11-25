@@ -35,10 +35,12 @@ class Block(nn.Module):
         qk_norm: bool = False,
         fused_attn: bool = True,  # use F.scaled_dot_product_attention or not
         rope=None,
+        layer_idx=None,
     ) -> None:
         super().__init__()
 
         self.norm1 = norm_layer(dim)
+        # import pdb; pdb.set_trace()
 
         self.attn = attn_class(
             dim,
@@ -50,6 +52,7 @@ class Block(nn.Module):
             qk_norm=qk_norm,
             fused_attn=fused_attn,
             rope=rope,
+            layer_idx=layer_idx,
         )
 
         self.ls1 = LayerScale(dim, init_values=init_values) if init_values else nn.Identity()
@@ -74,11 +77,11 @@ class Block(nn.Module):
         def attn_residual_func(x: Tensor, pos=None, attn_mask=None, past_key_values=None, use_cache=False) -> Union[Tensor, Tuple[Tensor, Dict]]:
             if use_cache:
                 output, new_kv = self.attn(self.norm1(x), pos=pos, past_key_values=past_key_values, use_cache=True)
-                return self.ls1(output), new_kv
+                return self.ls1(output), new_kv # kv: len=2   torch.Size([1, 16, 1, 1041, 64])  torch.Size([1, 16, 1, 1, 128])
             else:
                 if attn_mask is not None:
                     return self.ls1(self.attn(self.norm1(x), pos=pos, attn_mask=attn_mask))
-                else:
+                else: # 训练走下面
                     return self.ls1(self.attn(self.norm1(x), pos=pos))
         def ffn_residual_func(x: Tensor) -> Tensor:
             return self.ls2(self.mlp(self.norm2(x)))
@@ -105,7 +108,7 @@ class Block(nn.Module):
         elif self.training and self.sample_drop_ratio > 0.0:
             x = x + self.drop_path1(attn_residual_func(x, pos=pos, attn_mask=attn_mask))
             x = x + self.drop_path1(ffn_residual_func(x))  # FIXME: drop_path2
-        else:
+        else: # 下面
             x = x + attn_residual_func(x, pos=pos, attn_mask=attn_mask)
             x = x + ffn_residual_func(x)
         return x

@@ -200,7 +200,7 @@ def train(args):
         printer.info(f"Loading pretrained: {args.pretrained}")
         ckpt = torch.load(args.pretrained, map_location=device)
         printer.info(
-            model.load_state_dict(ckpt, strict=True)
+            model.load_state_dict(ckpt, strict=False)
         )
         del ckpt  # in case it occupies memory
 

@@ -18,7 +18,7 @@ class StreamVGGTOutput(ModelOutput):
 class StreamVGGT(nn.Module, PyTorchModelHubMixin):
     def __init__(self, img_size=518, patch_size=14, embed_dim=1024):
         super().__init__()
-
+        # import pdb; pdb.set_trace()
         self.aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=embed_dim)
         self.camera_head = CameraHead(dim_in=2 * embed_dim)
         self.point_head = DPTHead(dim_in=2 * embed_dim, output_dim=4, activation="inv_log", conf_activation="expp1")
@@ -38,7 +38,7 @@ class StreamVGGT(nn.Module, PyTorchModelHubMixin):
     ):
         images = torch.stack(
             [view["img"] for view in views], dim=0
-        ).permute(1, 0, 2, 3, 4)    # B S C H W
+        ).permute(1, 0, 2, 3, 4)    # B S C H W torch.Size([1, 10, 3, 518, 336])
 
         # If without batch dimension, add it
         if len(images.shape) == 4:
@@ -49,7 +49,8 @@ class StreamVGGT(nn.Module, PyTorchModelHubMixin):
         if history_info is None:
             history_info = {"token": None}
 
-        aggregated_tokens_list, patch_start_idx = self.aggregator(images)
+        # import pdb; pdb.set_trace()
+        aggregated_tokens_list, patch_start_idx = self.aggregator(images)    # 24layer的dino
         predictions = {}
 
         with torch.cuda.amp.autocast(enabled=False):
@@ -102,8 +103,9 @@ class StreamVGGT(nn.Module, PyTorchModelHubMixin):
                 ress.append(res)
             return StreamVGGTOutput(ress=ress, views=views)  # [S] [B, C, H, W]
         
-    def inference(self, frames, query_points: torch.Tensor = None, past_key_values=None):        
-        past_key_values = [None] * self.aggregator.depth
+    def inference(self, frames, query_points: torch.Tensor = None, past_key_values=None):  
+        # import pdb; pdb.set_trace()       # enter inference
+        past_key_values = [None] * self.aggregator.depth # 24
         past_key_values_camera = [None] * self.camera_head.trunk_depth
         
         all_ress = []
@@ -116,7 +118,8 @@ class StreamVGGT(nn.Module, PyTorchModelHubMixin):
                 past_key_values=past_key_values,
                 use_cache=True, 
                 past_frame_idx=i
-            )
+            ) # len(aggregator_output)=3 / len(aggregator_output[0])=24 / aggregator_output[0]数组里每个元素是torch.Size([1, 1, 1041, 2048])
+            # import pdb; pdb.set_trace()
             
             if isinstance(aggregator_output, tuple) and len(aggregator_output) == 3:
                 aggregated_tokens, patch_start_idx, past_key_values = aggregator_output

@@ -1,0 +1,8 @@
+checkpoints/
+ckpt/
+data/
+output/       
+*.pt
+*.pth
+*.ckpt
+*.bin

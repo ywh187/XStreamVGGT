@@ -87,6 +87,89 @@ class Attention(nn.Module):
         return x
 
 
+
+# class MemEffAttention(Attention):
+#     """
+#     Linear Attention (memory-efficient) version of the original Attention.
+#     Uses feature maps φ(q), φ(k) to approximate softmax(qk^T)v in O(N) time.
+#     """
+#     def __init__(
+#         self,
+#         dim: int,
+#         num_heads: int = 8,
+#         qkv_bias: bool = True,
+#         proj_bias: bool = True,
+#         attn_drop: float = 0.0,
+#         proj_drop: float = 0.0,
+#         norm_layer: nn.Module = nn.LayerNorm,
+#         qk_norm: bool = False,
+#         fused_attn: bool = True,  # use F.scaled_dot_product_attention or not
+#         rope=None,
+#         eps: float = 1e-6,  # numerical stability
+#     ):
+#         super().__init__(
+#             dim=dim,
+#             num_heads=num_heads,
+#             qkv_bias=qkv_bias,
+#             proj_bias=proj_bias,
+#             attn_drop=attn_drop,
+#             proj_drop=proj_drop,
+#             norm_layer=norm_layer,
+#             qk_norm=qk_norm,
+#             fused_attn=False,   # 禁止使用原生softmax注意力
+#             rope=rope,
+#         )
+#         self.eps = eps
+
+#     @staticmethod
+#     def feature_map(x: torch.Tensor) -> torch.Tensor:
+#         """ φ(x) = elu(x) + 1 — 常见的正值特征映射，避免负数 """
+#         return F.elu(x) + 1
+
+#     def forward(
+#         self,
+#         x: torch.Tensor,
+#         attn_bias=None,
+#         pos=None,
+#     ) -> Union[torch.Tensor, Tuple[torch.Tensor, Dict]]:
+
+#         B, N, C = x.shape # (10, 708, 1024)
+
+#         # 1. 生成 Q, K, V
+#         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim)
+#         qkv = qkv.permute(2, 0, 3, 1, 4)  # [3, B, H, N, D]
+#         q, k, v = qkv.unbind(0)
+
+#         q, k = self.q_norm(q), self.k_norm(k)
+
+#         # 2. 位置编码 (Rope)
+#         if self.rope is not None:
+#             q = self.rope(q, pos)
+#             k = self.rope(k, pos)
+
+#         # 3. 特征映射 φ(q), φ(k)
+#         q_phi = self.feature_map(q)   # [B, H, N, D]
+#         k_phi = self.feature_map(k)
+
+#         # 4. 计算 KV = Σ φ(k) * v
+#         kv = torch.einsum('b h n d, b h n e -> b h d e', k_phi, v)  # [B, H, D, D]
+
+#         # 5. 计算分母 normalizer = φ(q) • Σ φ(k)
+#         z = 1 / (torch.einsum('b h n d, b h d -> b h n', q_phi, k_phi.sum(dim=2)) + self.eps)  # [B, H, N]
+
+#         # 6. 输出 = φ(q) @ KV * z
+#         out = torch.einsum('b h n d, b h d e -> b h n e', q_phi, kv)  # [B, H, N, D]
+#         out = out * z.unsqueeze(-1)
+
+#         # 7. 还原回原形状
+#         out = out.transpose(1, 2).reshape(B, N, C)  # [B, N, C]
+#         out = self.proj(out)
+#         out = self.proj_drop(out)
+
+#         return out
+    
+
+
 class MemEffAttention(Attention):
     def forward(
         self, 
@@ -112,3 +195,5 @@ class MemEffAttention(Attention):
         x = self.proj_drop(x)
 
         return x
+
+

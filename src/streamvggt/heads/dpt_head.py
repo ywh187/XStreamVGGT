@@ -134,7 +134,7 @@ class DPTHead(nn.Module):
         B, S, _, H, W = images.shape
 
         # If frames_chunk_size is not specified or greater than S, process all frames at once
-        if frames_chunk_size is None or frames_chunk_size >= S:
+        if frames_chunk_size is None or frames_chunk_size >= S: # 进这里
             return self._forward_impl(aggregated_tokens_list, images, patch_start_idx)
 
         # Otherwise, process frames in chunks to manage memory usage
@@ -196,22 +196,22 @@ class DPTHead(nn.Module):
         dpt_idx = 0
 
         for layer_idx in self.intermediate_layer_idx:
-            x = aggregated_tokens_list[layer_idx][:, :, patch_start_idx:]
+            x = aggregated_tokens_list[layer_idx][:, :, patch_start_idx:] # 取出patch部分 torch.Size([1, 1, 1036, 2048])
 
             # Select frames if processing a chunk
             if frames_start_idx is not None and frames_end_idx is not None:
                 x = x[:, frames_start_idx:frames_end_idx]
 
-            x = x.reshape(B * S, -1, x.shape[-1])
+            x = x.reshape(B * S, -1, x.shape[-1]) # torch.Size([1, 1036, 2048])
 
             x = self.norm(x)
 
-            x = x.permute(0, 2, 1).reshape((x.shape[0], x.shape[-1], patch_h, patch_w))
+            x = x.permute(0, 2, 1).reshape((x.shape[0], x.shape[-1], patch_h, patch_w)) # torch.Size([1, 2048, 28, 37])
 
             x = self.projects[dpt_idx](x)
             if self.pos_embed:
                 x = self._apply_pos_embed(x, W, H)
-            x = self.resize_layers[dpt_idx](x)
+            x = self.resize_layers[dpt_idx](x) # torch.Size([1, 256, 112, 148])
 
             out.append(x)
             dpt_idx += 1
