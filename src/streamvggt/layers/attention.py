@@ -360,6 +360,8 @@ class Attention(nn.Module):
         fused_attn: bool = True,
         rope=None,
         layer_idx=None,
+        cache_size: int = 2048,  # KV cache 最大长度 
+        # window_keep: int = 0,   # 保留最新 token 个数（不剪掉）
     ) -> None:
         super().__init__()
 
@@ -381,6 +383,123 @@ class Attention(nn.Module):
         self.layer_idx = layer_idx
         self.rope = rope
 
+        self.cache_size = cache_size
+        # self.window_keep = window_keep # 后面会被设置为新的q的长度
+
+    def prune_kv_cache(self, kv: Tuple[torch.Tensor, torch.Tensor], q_new: torch.Tensor):
+        k, v = kv
+        B, H, T, D = k.shape
+        N_new = q_new.shape[2]
+        
+        # 边界
+        if T <= self.cache_size:
+            return kv
+        
+        # import pdb; pdb.set_trace()
+
+        # 确保 window_keep 不超过 cache_size
+        window_keep = N_new # 默认用q的长度
+        num_keep = max(0, self.cache_size - window_keep)
+        
+        # Query 降采样
+        special_tokens = q_new[:, :, :5, :]
+        normal_tokens = q_new[:, :, 5:, :]
+        
+        if normal_tokens.shape[2] > 1:
+            pool_size = 16
+            n = normal_tokens.shape[2]
+            n_pool = n // pool_size
+            pooled = normal_tokens[:, :, :n_pool*pool_size, :].reshape(B, H, n_pool, pool_size, D).mean(dim=3)
+            
+            # 多余的
+            remainder = normal_tokens[:, :, n_pool*pool_size:, :]
+            if remainder.shape[2] > 0:
+                remainder_pooled = remainder.mean(dim=2, keepdim=True)
+                pooled = torch.cat([pooled, remainder_pooled], dim=2)
+            
+            normal_tokens_pooled = pooled
+        else:
+            normal_tokens_pooled = normal_tokens
+        
+        q_light = torch.cat([special_tokens, normal_tokens_pooled], dim=2)
+        
+        # 计算重要性（只针对历史 token）
+        q_score = q_light.mean(dim=1)  # [B, N', D]
+        k_score = k[:, :, :T-window_keep, :].mean(dim=1)  # [B, T-window_keep, D]
+        scores = (q_score @ k_score.transpose(-2, -1)).mean(dim=1)  # [B, T-window_keep]
+        
+        # Top-K 选择
+        topk_idx = torch.topk(scores, min(num_keep, scores.shape[1]), dim=-1).indices
+        
+        # 窗口索引
+        window_idx = torch.arange(T-window_keep, T, device=k.device).unsqueeze(0).expand(B, -1)
+        
+        # 合并并排序（关键修复）
+        keep_idx = torch.cat([topk_idx, window_idx], dim=-1)
+        keep_idx = torch.sort(keep_idx, dim=-1).values
+        
+        # 更新
+        # batch_idx = torch.arange(B, device=k.device).unsqueeze(1).expand(-1, keep_idx.shape[1])
+        # new_k = k[batch_idx, :, keep_idx]
+        # new_v = v[batch_idx, :, keep_idx]
+        keep_idx_expanded = keep_idx.unsqueeze(1).unsqueeze(-1).expand(B, H, -1, D)
+        new_k = torch.gather(k, dim=2, index=keep_idx_expanded)  # [B, H, num_keep, D]
+        new_v = torch.gather(v, dim=2, index=keep_idx_expanded)
+        
+        return new_k, new_v
+
+    # def prune_kv_cache(self, kv: Tuple[torch.Tensor, torch.Tensor], q_new: torch.Tensor):
+    #     """
+    #     kv: (k,v) -> [B,H,T,D]
+    #     q_new: 当前帧 q -> [B,H,N,D]
+    #     """
+    #     import pdb; pdb.set_trace()
+
+    #     k, v = kv
+    #     B,H,T,D = k.shape # T是KV len
+    #     self.window_keep = q_new.shape[2] # 新的这一部分不动
+
+    #     # 如果 cache 长度不大于阈值，不剪
+    #     if T <= self.cache_size:
+    #         return kv
+
+    #     # ---- 减少query数量 用于计算重要性 ----
+    #     # 特殊 token 前5个保留 不参与pooling
+    #     special_tokens = q_new[:,:,:5,:]  # [B,H,5,D]
+    #     normal_tokens = q_new[:,:,5:,:]  # [B,H,N-5,D]
+
+    #     if normal_tokens.shape[2] > 1:
+    #         # 平均池化，比如每16个取1个
+    #         pool_size = 16
+    #         n = normal_tokens.shape[2]
+    #         n_pool = n // pool_size
+    #         normal_tokens_pooled = normal_tokens[:,:,:n_pool*pool_size,:].reshape(B,H,n_pool,pool_size,D).mean(dim=3)
+    #     else:
+    #         normal_tokens_pooled = normal_tokens
+
+    #     q_light = torch.cat([special_tokens, normal_tokens_pooled], dim=2)  # [B,H,N',D] torch.Size([1, 16, 69, 64])
+
+    #     # ---- 2. 计算 token 重要性 score ----
+    #     q_score = q_light.mean(dim=1, keepdim=True).squeeze(1)  # [B,1,N',D]->[B,N',D]
+    #     k_score = k.mean(dim=1, keepdim=True).squeeze(1)        # [B,1,T,D]->[B,T,D]
+    #     # 只要之前的token的分数
+    #     scores = (q_score @ k_score.transpose(-2,-1)).mean(dim=1)[:, :T-self.window_keep]  # [B,T]
+
+    #     # ---- 3. top-k 保留重要 KV ----
+    #     num_keep = self.cache_size - self.window_keep
+    #     topk_idx = torch.topk(scores, num_keep, dim=-1).indices  # [B,num_keep]
+
+    #     # ---- 4. 保留最新窗口部分 token ----
+    #     window_idx = torch.arange(T-self.window_keep, T, device=k.device)
+    #     keep_idx = torch.cat([topk_idx, window_idx.unsqueeze(0).expand(B,-1)], dim=-1)
+
+    #     # ---- 5. 更新 KV cache ----
+    #     # index_select 逐 batch 处理
+    #     new_k = torch.stack([k[b,:,keep_idx[b]] for b in range(B)], dim=0)
+    #     new_v = torch.stack([v[b,:,keep_idx[b]] for b in range(B)], dim=0)
+
+    #     return new_k, new_v
+
     def forward(
         self,
         x,
@@ -392,32 +511,25 @@ class Attention(nn.Module):
     ):
         B, N, C = x.shape
 
-        qkv = (
-            self.qkv(x)
-            .reshape(B, N, 3, self.num_heads, self.head_dim)
-            .permute(2, 0, 3, 1, 4)
-        )
-        q, k, v = qkv.unbind(0)   # [B, H, N, D]
+        # ---- QKV projection ----
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2,0,3,1,4)
+        q, k, v = qkv.unbind(0)  # [B,H,N,D]
 
         # ---- Norm ----
         q = self.q_norm(q)
         k = self.k_norm(k)
 
-        # ---- RoPE apply BEFORE cache concat ----
+        # ---- RoPE ----
         if self.rope is not None:
-            q = self.rope(q, pos)   # [B, H, N, D]
-            k = self.rope(k, pos)   # [B, H, N, D]
+            q = self.rope(q, pos)
+            k = self.rope(k, pos)
 
+        # ---- KV cache update ----
         if use_cache:
             if past_key_values is not None:
-                # import pdb; pdb.set_trace()
-                past_k, past_v = past_key_values  # both [B, H, T_prev, D]
-                # if past_k.shape[2] > 500 :
-                #     import pdb; pdb.set_trace()
-                k = torch.cat([past_k, k], dim=2) # cat time dimension
+                past_k, past_v = past_key_values  # [B,H,T,D]
+                k = torch.cat([past_k, k], dim=2)
                 v = torch.cat([past_v, v], dim=2)
-
-            # store 4D K/V
             new_kv = (k, v)
         else:
             new_kv = None
@@ -425,29 +537,29 @@ class Attention(nn.Module):
         # ---- Attention ----
         if self.fused_attn:
             x = F.scaled_dot_product_attention(
-                q, # torch.Size([1, 16, 1041, 64])
-                k, # torch.Size([1, 16, 2082, 64])
-                v,
+                q, k, v,
                 attn_mask=attn_mask,
                 dropout_p=self.attn_drop.p if self.training else 0.0,
             )
         else:
-            q = q * self.scale
-            attn = q @ k.transpose(-2, -1)
+            q_scaled = q * self.scale
+            attn = q_scaled @ k.transpose(-2,-1)
             if attn_mask is not None:
                 attn += attn_mask
             attn = attn.softmax(dim=-1)
             attn = self.attn_drop(attn)
             x = attn @ v
 
-        # ---- Output projection ----
-        x = x.transpose(1, 2).reshape(B, N, C)
+        x = x.transpose(1,2).reshape(B,N,C)
         x = self.proj_drop(self.proj(x))
 
+        # ---- attention结束后做 KV cache pruning ---- 
         if use_cache:
+            new_kv = self.prune_kv_cache(new_kv, q)
             return x, new_kv
 
         return x
+
 
 # # baseline原版attention
 # class Attention(nn.Module):

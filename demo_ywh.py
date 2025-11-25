@@ -149,9 +149,9 @@ def main():
     output_dir = "output/example_building_result"
     output_images_dir = os.path.join(output_dir, "images")
 
-    if os.path.exists(output_dir):
-        shutil.rmtree(output_dir)
-    os.makedirs(output_images_dir)
+    # if os.path.exists(output_dir):
+    #     shutil.rmtree(output_dir)
+    os.makedirs(output_images_dir, exist_ok=True)
 
     # 2. Copy example images to the target directory structure
     image_files = glob.glob(os.path.join(example_image_dir, "*.jpg"))
