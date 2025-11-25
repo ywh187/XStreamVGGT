@@ -1,3 +1,30 @@
+
+
+环境配置和一些代码说明可以参考：
+https://gwe6ikwnqet.feishu.cn/wiki/Ay68wdk7AisfD4kTwKrcffzvnbg
+
+
+./StreamVGGT_kvprune_quantization/StreamVGGT_environment.yml
+是导出的可以用的环境配置文件，可以按照这个配置：
+conda env create -f StreamVGGT_environment.yml
+
+
+以下一个demo代码，把他运行起来环境就配置成功了,也可以用这个来调试，输出的glb文件可以用vscode的glb浏览插件查看。
+./StreamVGGT_kvprune_quantization/demo_ywh.py
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 <div align="center">
 <h1>Streaming 4D Visual Geometry Transformer</h1>
 </div>
