@@ -53,6 +53,8 @@ pip install -r requirements.txt
 conda install 'llvm-openmp<16'
 ```
 
+
+
 ### Download Checkpoints
 Please download pretrained teacher model from [here](https://huggingface.co/facebook/VGGT-1B/blob/main/model.pt).
 
