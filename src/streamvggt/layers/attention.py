@@ -346,7 +346,6 @@ if os.environ.get("USE_XFORMERS", "1") == "1":
 
 
 
-
 class Attention(nn.Module):
     def __init__(
         self,
@@ -358,91 +357,196 @@ class Attention(nn.Module):
         proj_drop: float = 0.0,
         norm_layer: nn.Module = nn.LayerNorm,
         qk_norm: bool = False,
-        fused_attn: bool = True,  # use F.scaled_dot_product_attention or not
+        fused_attn: bool = True,
         rope=None,
         layer_idx=None,
     ) -> None:
         super().__init__()
-        assert dim % num_heads == 0, "dim should be divisible by num_heads"
+
+        assert dim % num_heads == 0
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
-        self.scale = self.head_dim**-0.5
-        self.fused_attn = fused_attn
-        self.layer_idx = layer_idx
+        self.scale = self.head_dim ** -0.5
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+
         self.q_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
         self.k_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
+
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim, bias=proj_bias)
         self.proj_drop = nn.Dropout(proj_drop)
+
+        self.fused_attn = fused_attn
+        self.layer_idx = layer_idx
         self.rope = rope
 
-    def forward(self, 
-        x: torch.Tensor, 
-        pos=None, 
-        attn_mask=None, 
-        past_key_values=None, 
-        use_cache=False
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, Tuple]]:
+    def forward(
+        self,
+        x,
+        pos=None,
+        attn_mask=None,
+        past_key_values=None,   # (past_k, past_v)
+        use_cache=False,
+        **kwargs
+    ):
         B, N, C = x.shape
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv.unbind(0)
 
-        pos_k = pos
-        if use_cache:
-            # import pdb; pdb.set_trace()
-            k = k.unsqueeze(2) # torch.Size([1, 16, 1, 1041, 64])
-            v = v.unsqueeze(2)
-            if past_key_values is not None:
-                past_k, past_v = past_key_values
-                k = torch.cat([past_k, k], dim=2) # torch.Size([1, 16, 2, 1041, 64])
-                v = torch.cat([past_v, v], dim=2)
-                
-            new_kv = (k, v)
-            a, b, c, d, e = k.shape
-            k = k.reshape(a, b, c*d, e) # torch.Size([1, 16, 2082, 64]) 这里才展开
-            v = v.reshape(a, b, c*d, e) # torch.Size([1, 16, 2082, 64])
-            if pos_k is not None:
-                #print(pos_k.shape)
-                pos_k = pos_k.repeat(1, c, 1) # 第一帧 torch.Size([1, 1041, 2])  第二帧torch.Size([1, 2082, 2])
-                #print(pos_k.shape)
+        qkv = (
+            self.qkv(x)
+            .reshape(B, N, 3, self.num_heads, self.head_dim)
+            .permute(2, 0, 3, 1, 4)
+        )
+        q, k, v = qkv.unbind(0)   # [B, H, N, D]
 
-        q, k = self.q_norm(q), self.k_norm(k)
+        # ---- Norm ----
+        q = self.q_norm(q)
+        k = self.k_norm(k)
 
+        # ---- RoPE apply BEFORE cache concat ----
         if self.rope is not None:
-            # import pdb; pdb.set_trace()
-            q = self.rope(q, pos)   # torch.Size([1, 16, 1041, 64]) torch.Size([1, 1041, 2])
-            k = self.rope(k, pos_k) # torch.Size([1, 16, 2082, 64])  位置编码帧与帧之间是一样的，可以做成emb完再存起来
+            q = self.rope(q, pos)   # [B, H, N, D]
+            k = self.rope(k, pos)   # [B, H, N, D]
 
+        if use_cache:
+            if past_key_values is not None:
+                # import pdb; pdb.set_trace()
+                past_k, past_v = past_key_values  # both [B, H, T_prev, D]
+                # if past_k.shape[2] > 500 :
+                #     import pdb; pdb.set_trace()
+                k = torch.cat([past_k, k], dim=2) # cat time dimension
+                v = torch.cat([past_v, v], dim=2)
+
+            # store 4D K/V
+            new_kv = (k, v)
+        else:
+            new_kv = None
+
+        # ---- Attention ----
         if self.fused_attn:
             x = F.scaled_dot_product_attention(
-                q,
-                k,
+                q, # torch.Size([1, 16, 1041, 64])
+                k, # torch.Size([1, 16, 2082, 64])
                 v,
                 attn_mask=attn_mask,
                 dropout_p=self.attn_drop.p if self.training else 0.0,
             )
-
         else:
             q = q * self.scale
             attn = q @ k.transpose(-2, -1)
-
-            # Mask
             if attn_mask is not None:
-                assert attn_mask.shape[-2:] == (N, N), f"Expected mask shape [..., {N}, {N}], got {attn_mask.shape}"
-                attn = attn + attn_mask
-
+                attn += attn_mask
             attn = attn.softmax(dim=-1)
             attn = self.attn_drop(attn)
             x = attn @ v
 
+        # ---- Output projection ----
         x = x.transpose(1, 2).reshape(B, N, C)
-        x = self.proj(x)
-        x = self.proj_drop(x)
+        x = self.proj_drop(self.proj(x))
+
         if use_cache:
             return x, new_kv
+
         return x
+
+# # baseline原版attention
+# class Attention(nn.Module):
+#     def __init__(
+#         self,
+#         dim: int,
+#         num_heads: int = 8,
+#         qkv_bias: bool = True,
+#         proj_bias: bool = True,
+#         attn_drop: float = 0.0,
+#         proj_drop: float = 0.0,
+#         norm_layer: nn.Module = nn.LayerNorm,
+#         qk_norm: bool = False,
+#         fused_attn: bool = True,  # use F.scaled_dot_product_attention or not
+#         rope=None,
+#         layer_idx=None,
+#     ) -> None:
+#         super().__init__()
+#         assert dim % num_heads == 0, "dim should be divisible by num_heads"
+#         self.num_heads = num_heads
+#         self.head_dim = dim // num_heads
+#         self.scale = self.head_dim**-0.5
+#         self.fused_attn = fused_attn
+#         self.layer_idx = layer_idx
+
+#         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+#         self.q_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
+#         self.k_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
+#         self.attn_drop = nn.Dropout(attn_drop)
+#         self.proj = nn.Linear(dim, dim, bias=proj_bias)
+#         self.proj_drop = nn.Dropout(proj_drop)
+#         self.rope = rope
+
+#     def forward(self, 
+#         x: torch.Tensor, 
+#         pos=None, 
+#         attn_mask=None, 
+#         past_key_values=None, 
+#         use_cache=False
+#     ) -> Union[torch.Tensor, Tuple[torch.Tensor, Tuple]]:
+#         B, N, C = x.shape
+#         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+#         q, k, v = qkv.unbind(0)
+
+#         pos_k = pos
+#         if use_cache:
+#             # import pdb; pdb.set_trace()
+#             k = k.unsqueeze(2) # torch.Size([1, 16, 1, 1041, 64])
+#             v = v.unsqueeze(2)
+#             if past_key_values is not None:
+#                 #import pdb; pdb.set_trace()
+#                 past_k, past_v = past_key_values # torch.Size([1, 16, 1, 1, 128])
+#                 k = torch.cat([past_k, k], dim=2) # torch.Size([1, 16, 2, 1041, 64])
+#                 v = torch.cat([past_v, v], dim=2)
+                
+#             new_kv = (k, v)
+#             a, b, c, d, e = k.shape
+#             k = k.reshape(a, b, c*d, e) # torch.Size([1, 16, 2082, 64]) 这里才展开
+#             v = v.reshape(a, b, c*d, e) # torch.Size([1, 16, 2082, 64])
+#             if pos_k is not None:
+#                 #print(pos_k.shape)
+#                 pos_k = pos_k.repeat(1, c, 1) # 第一帧 torch.Size([1, 1041, 2])  第二帧torch.Size([1, 2082, 2])
+#                 #print(pos_k.shape)
+
+#         q, k = self.q_norm(q), self.k_norm(k)
+
+#         if self.rope is not None:
+#             # import pdb; pdb.set_trace()
+#             q = self.rope(q, pos)   # torch.Size([1, 16, 1041, 64]) torch.Size([1, 1041, 2])
+#             k = self.rope(k, pos_k) # torch.Size([1, 16, 2082, 64])  位置编码帧与帧之间是一样的，可以做成emb完再存起来
+
+#         if self.fused_attn:
+#             x = F.scaled_dot_product_attention(
+#                 q,
+#                 k,
+#                 v,
+#                 attn_mask=attn_mask,
+#                 dropout_p=self.attn_drop.p if self.training else 0.0,
+#             )
+
+#         else:
+#             q = q * self.scale
+#             attn = q @ k.transpose(-2, -1)
+
+#             # Mask
+#             if attn_mask is not None:
+#                 assert attn_mask.shape[-2:] == (N, N), f"Expected mask shape [..., {N}, {N}], got {attn_mask.shape}"
+#                 attn = attn + attn_mask
+
+#             attn = attn.softmax(dim=-1)
+#             attn = self.attn_drop(attn)
+#             x = attn @ v
+
+#         x = x.transpose(1, 2).reshape(B, N, C)
+#         x = self.proj(x)
+#         x = self.proj_drop(x)
+#         if use_cache:
+#             return x, new_kv
+#         return x
 
 
 

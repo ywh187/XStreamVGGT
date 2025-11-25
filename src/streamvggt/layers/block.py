@@ -77,7 +77,7 @@ class Block(nn.Module):
         def attn_residual_func(x: Tensor, pos=None, attn_mask=None, past_key_values=None, use_cache=False) -> Union[Tensor, Tuple[Tensor, Dict]]:
             if use_cache:
                 output, new_kv = self.attn(self.norm1(x), pos=pos, past_key_values=past_key_values, use_cache=True)
-                return self.ls1(output), new_kv # kv: len=2   torch.Size([1, 16, 1, 1041, 64])  torch.Size([1, 16, 1, 1, 128])
+                return self.ls1(output), new_kv # kv: len=2   torch.Size([1, 16, 2082, 64])
             else:
                 if attn_mask is not None:
                     return self.ls1(self.attn(self.norm1(x), pos=pos, attn_mask=attn_mask))

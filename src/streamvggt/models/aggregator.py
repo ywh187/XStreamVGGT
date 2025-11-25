@@ -211,7 +211,9 @@ class Aggregator(nn.Module):
         B, S, C_in, H, W = images.shape
 
         if use_cache and past_key_values[0] is not None:
-            _, _, S_true, _, _ = past_key_values[0][0].shape
+            # _, _, S_true, _, _ = past_key_values[0][0].shape
+            # past_k: [B, H, T, D]
+            _, _, S_true, _ = past_key_values[0][0].shape
             S_true += 1
         else:
             S_true = S
