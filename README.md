@@ -43,7 +43,6 @@ cd StreamVGGT
 ```
 2. Create conda environment
 ```bash
-source /mnt/bn/automl-aigc/weihaoye/miniconda3/bin/activate 
 conda create -n StreamVGGT python=3.11 cmake=3.14.0
 conda activate StreamVGGT 
 ```

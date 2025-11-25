@@ -6,3 +6,4 @@ output/
 *.pth
 *.ckpt
 *.bin
+ywh.sh
