@@ -15,8 +15,6 @@
 
 ## Overview
 
-Learning-based 3D reconstruction has been significantly advanced by transformer-based models such as StreamVGGT, which enable real-time streaming reconstruction via frame-wise causal attention. However, their practical deployment is hindered by the unbounded growth of KV cache, leading to excessive memory consumption and latency.
-
 We propose **XStreamVGGT**, a **tuning-free and extremely memory-efficient streaming vision geometry transformer** that compresses KV cache through **joint token pruning and distribution-aware quantization**. By removing redundant tokens and quantizing remaining KV representations, XStreamVGGT achieves up to **4.42× memory reduction** and **5.48× inference speedup**, while maintaining mostly negligible performance degradation. This enables scalable and long-horizon streaming 3D reconstruction in real-world applications.
 
 <div align="center">
