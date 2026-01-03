@@ -6,7 +6,7 @@
 
 > **XStreamVGGT: Extremely Memory-Efficient Streaming Vision Geometry Grounded Transformer with KV Cache Compression**
 
-> **Zunhai Su**<sup>*</sup>, **Weihao Ye**<sup>*</sup>, Hansen Feng, Keyu Fan, Jing Zhang,
+> **Zunhai Su**<sup>\*</sup>, **Weihao Ye**<sup>\*</sup>, Hansen Feng, Keyu Fan, Jing Zhang,
 > Dahai Yu, Zhengwu Liu, Ngai Wong
 >
 > <sup>*</sup> Equal contribution.
