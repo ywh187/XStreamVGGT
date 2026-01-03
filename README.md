@@ -1,227 +1,138 @@
-
-
-环境配置和一些代码说明可以参考：
-https://gwe6ikwnqet.feishu.cn/wiki/Ay68wdk7AisfD4kTwKrcffzvnbg
-
-
-./StreamVGGT_kvprune_quantization/StreamVGGT_environment.yml
-是导出的可以用的环境配置文件，可以按照这个配置：
-conda env create -f StreamVGGT_environment.yml
-
-
-以下一个demo代码，把他运行起来环境就配置成功了,也可以用这个来调试，输出的glb文件可以用vscode的glb浏览插件查看。
-./StreamVGGT_kvprune_quantization/demo_ywh.py
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 <div align="center">
-<h1>Streaming 4D Visual Geometry Transformer</h1>
+<h1>XStreamVGGT: Extremely Memory-Efficient Streaming Vision Geometry Grounded Transformer with KV Cache Compression</h1>
 </div>
 
-### [Paper](https://arxiv.org/abs/2507.11539)  | [Project Page](https://wzzheng.net/StreamVGGT)  | [Online Demo](https://huggingface.co/spaces/lch01/StreamVGGT)
+### [Paper](https://arxiv.org/abs/0000.00000) | [Code](https://github.com/your-repo/XStreamVGGT)
 
->Streaming 4D Visual Geometry Transformer
+> **XStreamVGGT: Extremely Memory-Efficient Streaming Vision Geometry Grounded Transformer with KV Cache Compression**
 
->Dong Zhuo<sup>\*</sup>, [Wenzhao Zheng](https://wzzheng.net/)<sup>*</sup>$\dagger$,  Jiahe Guo, Yuqi Wu, [Jie Zhou](https://scholar.google.com/citations?user=6a79aPwAAAAJ&hl=en&authuser=1), [Jiwen Lu](http://ivg.au.tsinghua.edu.cn/Jiwen_Lu/)
+> **Zunhai Su**<sup>*</sup>, **Weihao Ye**<sup>*</sup>, Hansen Feng, Keyu Fan, Jing Zhang,
+> Dahai Yu, Zhengwu Liu, Ngai Wong
+>
+> <sup>*</sup> Equal contribution.
 
-<sup>*</sup> Equal contribution. $\dagger$ Project leader.
-
-
-**StreamVGGT**, a causal transformer architecture for **real-time streaming 4D visual geometry perception** compatiable with LLM-targeted attention mechanism (e.g., [FlashAttention](https://github.com/Dao-AILab/flash-attention)), delivers both fast inference and high-quality 4D reconstruction.
-
-## News
-
-- **[2025/7/18]** [Demo](https://huggingface.co/spaces/lch01/StreamVGGT) and [checkpoints](https://huggingface.co/lch01/StreamVGGT/) released on Hugging Face; demo code is available for local launch.
-- **[2025/7/15]** Paper released on [arXiv](https://arxiv.org/abs/2507.11539).
-- **[2025/7/14]** Release the code for **fine-tuning VGGT**.
-- **[2025/7/13]** Check out [Point3R](https://github.com/YkiWu/Point3R) for another streaming 3D reconstruction work of ours!
-- **[2025/7/13]** Distillation code for VGGT is released.
-- **[2025/7/13]** Inference code with [FlashAttention-2](https://github.com/Dao-AILab/flash-attention) is released.
-- **[2025/7/13]** Training/evaluation code release.
+---
 
 ## Overview
 
-Given a sequence of images, unlike offline models that require reprocessing the entire sequence and reconstructing the entire scene upon receiving each new image, our StreamVGGT employs temporal
-causal attention and leverages cached memory token to support efficient incremental on-the-fly reconstruction, enabling interative and real-time online applitions.
+Learning-based 3D reconstruction has been significantly advanced by transformer-based models such as StreamVGGT, which enable real-time streaming reconstruction via frame-wise causal attention. However, their practical deployment is hindered by the unbounded growth of KV cache, leading to excessive memory consumption and latency.
 
-<img src="./assets/teaser_v2_01.png" alt="overview" style="width: 100%;" />
+We propose **XStreamVGGT**, a **tuning-free and extremely memory-efficient streaming vision geometry transformer** that compresses KV cache through **joint token pruning and distribution-aware quantization**. By removing redundant tokens and quantizing remaining KV representations, XStreamVGGT achieves up to **4.42× memory reduction** and **5.48× inference speedup**, while maintaining mostly negligible performance degradation. This enables scalable and long-horizon streaming 3D reconstruction in real-world applications.
 
-### On-the-Fly Online Reconstruction from Streaming Inputs
+<div align="center">
+  <img src="xstreamvggt_main.png" width="90%">
+</div>
 
-<img src="./assets/results.png" alt="overview" style="width: 100%;" />
+---
 
-### Installation
+## Environment Setup
 
-1. Clone StreamVGGT
+We recommend using Conda to set up the environment:
+
 ```bash
-git clone https://github.com/wzzheng/StreamVGGT.git
-cd StreamVGGT
-```
-2. Create conda environment
-```bash
-conda create -n StreamVGGT python=3.11 cmake=3.14.0
-conda activate StreamVGGT 
+conda env create -f StreamVGGT_environment.yml
+conda activate streamvggt
 ```
 
-3. Install requirements
-```bash
-pip install -r requirements.txt 
-conda install 'llvm-openmp<16'
+---
+
+## Model Weights
+
+Download the pretrained StreamVGGT model weights from:
+
+* [https://huggingface.co/lch01/StreamVGGT](https://huggingface.co/lch01/StreamVGGT)
+
+After downloading, place the checkpoint file under:
+
+```text
+XStreamVGGT/ckpt/
 ```
 
+---
 
+## Evaluation Datasets
 
-### Download Checkpoints
-Please download pretrained teacher model from [here](https://huggingface.co/facebook/VGGT-1B/blob/main/model.pt).
+Please refer to the official instructions of the following repositories to prepare the evaluation datasets:
 
-The checkpoint of StreamVGGT is also available at both [Hugging Face](https://huggingface.co/lch01/StreamVGGT/) and [Tsinghua cloud](https://cloud.tsinghua.edu.cn/d/d6ad8f36fcd541bcb246/).
+* [MonST3R](https://github.com/Junyi42/monst3r/blob/main/data/evaluation_script.md)
+* [Spann3R](https://github.com/HengyiWang/spann3r/blob/main/docs/data_preprocess.md)
 
+The supported datasets include:
 
-## Data Preparation
-### Training Datasets
-Our training data includes 14 datasets. Please download the datasets from their official sources and refer to [CUT3R](https://github.com/CUT3R/CUT3R/blob/main/docs/preprocess.md) for processing these datasets.
+* Sintel
+* Bonn
+* KITTI
+* NYU-v2
+* ScanNet
+* 7Scenes
+* Neural-RGBD
 
-  - [ARKitScenes](https://github.com/apple/ARKitScenes) 
-  - [BlendedMVS](https://github.com/YoYo000/BlendedMVS)
-  - [CO3Dv2](https://github.com/facebookresearch/co3d)
-  - [MegaDepth](https://www.cs.cornell.edu/projects/megadepth/)
-  - [MVS-Synth](https://phuang17.github.io/DeepMVS/mvs-synth.html)
-  - [ScanNet++](https://kaldir.vc.in.tum.de/scannetpp/) 
-  - [ScanNet](http://www.scan-net.org/ScanNet/)
-  - [Spring](https://spring-benchmark.org/)
-  - [Hypersim](https://github.com/apple/ml-hypersim)
-  - [WildRGB-D](https://github.com/wildrgbd/wildrgbd/)
-  - [WayMo Open dataset](https://github.com/waymo-research/waymo-open-dataset)
-  - [Virtual KITTI 2](https://europe.naverlabs.com/research/computer-vision/proxy-virtual-worlds-vkitti-2/)
-  - [OmniObject3D](https://omniobject3d.github.io/)
-  - [PointOdyssey](https://pointodyssey.com/)
-
-### Evaluation Datasets
-Please refer to [MonST3R](https://github.com/Junyi42/monst3r/blob/main/data/evaluation_script.md) and [Spann3R](https://github.com/HengyiWang/spann3r/blob/main/docs/data_preprocess.md) to prepare Sintel, Bonn, KITTI, NYU-v2, ScanNet, 7scenes and Neural-RGBD datasets.
+---
 
 ## Folder Structure
-The overall folder structure should be organized as follows：
-```
-StreamVGGT
+
+The overall folder structure should be organized as follows:
+
+```text
+XStreamVGGT
 ├── ckpt/
-|   ├── model.pt
-|   └── checkpoints.pth
+│   └── checkpoints.pth
 ├── config/
-|   ├── ...
+│   ├── ...
 ├── data/
 │   ├── eval/
-|   |   ├── 7scenes
-|   |   ├── bonn
-|   |   ├── kitti
-|   |   ├── neural_rgbd
-|   |   ├── nyu-v2
-|   |   ├── scannetv2
-|   |   └── sintel
+│   │   ├── 7scenes
+│   │   ├── bonn
+│   │   ├── kitti
+│   │   ├── neural_rgbd
+│   │   ├── nyu-v2
+│   │   ├── scannetv2
+│   │   └── sintel
 │   ├── train/
 │   │   ├── processed_arkitscenes
-|   |   ├── ...
+│   │   ├── ...
 └── src/
     ├── ...
 ```
 
-## Finetuning VGGT
-We also provide the following commands to fine-tune VGGT (excluding the track head) if you like. 
-```bash
-cd src/
-NCCL_DEBUG=TRACE TORCH_DISTRIBUTED_DEBUG=DETAIL HYDRA_FULL_ERROR=1 accelerate launch --multi_gpu --main_process_port 26902 ./finetune.py --config-name finetune
-```
-
-## Training StreamVGGT
-We provide the following commands for training.
-
-```bash
-cd src/
-NCCL_DEBUG=TRACE TORCH_DISTRIBUTED_DEBUG=DETAIL HYDRA_FULL_ERROR=1 accelerate launch --multi_gpu --main_process_port 26902 ./train.py --config-name train
-```
+---
 
 ## Evaluation
-The evaluation code follows [MonST3R](https://github.com/Junyi42/monst3r/blob/main/data/evaluation_script.md), [CUT3R](https://github.com/CUT3R/CUT3R/blob/main/docs/eval.md) and [VGGT](https://github.com/facebookresearch/vggt).
+
+### Standard KV Cache (Pruning Only)
+
+To evaluate XStreamVGGT with KV cache pruning enabled:
 
 ```bash
-cd src/
+CUDA_VISIBLE_DEVICES=0 \
+KV_POOL_SIZE=16 \
+KV_CACHE_SIZE=2048 \
+bash eval/video_depth/run.sh
 ```
-### Monodepth
+
+---
+
+### KV Cache Pruning + Quantization
+
+To evaluate the version with **KV cache quantization**, please switch to the corresponding branch first:
+
 ```bash
-bash eval/monodepth/run.sh 
+git checkout prune&fake_quant
 ```
 
-Results will be saved in `eval_results/monodepth/${data}_${model_name}/metric.json`.
+Then run:
 
-### VideoDepth
 ```bash
-bash eval/video_depth/run.sh 
+CUDA_VISIBLE_DEVICES=0 \
+KV_QUANT_MODE=KCVT \
+KV_POOL_SIZE=16 \
+KV_CACHE_SIZE=2048 \
+bash eval/video_depth/run.sh
 ```
 
-Results will be saved in `eval_results/video_depth/${data}_${model_name}/result_scale.json`.
-
-### Multi-view Reconstruction
-```bash
-bash eval/mv_recon/run.sh 
-```
-
-Results will be saved in `eval_results/mv_recon/${model_name}_${ckpt_name}/logs_all.txt`.
-
-### Camera Pose Estimation
-1. Install the required dependencies:
-```bash
-pip install pycolmap==3.10.0 pyceres==2.3
-git clone https://github.com/cvg/LightGlue.git
-cd LightGlue
-python -m pip install -e .
-cd ..
-```
-2. Please refer to [VGGT](https://github.com/facebookresearch/vggt) to prepare the co3d dataset.
-
-3. Run the evaluation code:
-```bash
-python eval/pose_evaluation/test_co3d.py --co3d_dir /YOUR/CO3D/PATH --co3d_anno_dir /YOUR/CO3D/ANNO/PATH --seed 0
-```
-
-## Demo
-We provide a demo for StreamVGGT, based on the demo code from [VGGT](https://github.com/facebookresearch/vggt). You can follow the instructions below to launch it locally or try it out directly on [Hugging Face](https://huggingface.co/spaces/lch01/StreamVGGT).
-```bash
-pip install -r requirements_demo.txt
-python demo_gradio.py
-```
-
-**Note**: While StreamVGGT typically reconstructs a scene in under one second, 3D point visualization may take much longer due to slower third-party rendering.
+---
 
 ## Acknowledgements
-Our code is based on the following brilliant repositories:
 
-[DUSt3R](https://github.com/naver/dust3r)
-[MonST3R](https://github.com/Junyi42/monst3r.git)
-[Spann3R](https://github.com/HengyiWang/spann3r.git)
-[CUT3R](https://github.com/CUT3R/CUT3R)
-[VGGT](https://github.com/facebookresearch/vggt)
-[Point3R](https://github.com/YkiWu/Point3R)
+This codebase is built upon [StreamVGGT](https://github.com/wzzheng/StreamVGGT) and related streaming 3D reconstruction frameworks. We thank the authors for their open-source contributions.
 
-Many thanks to these authors!
-
-## Citation
-
-If you find this project helpful, please consider citing the following paper:
-```
-@article{streamVGGT,
-      title={Streaming 4D Visual Geometry Transformer}, 
-      author={Dong Zhuo and Wenzhao Zheng and Jiahe Guo and Yuqi Wu and Jie Zhou and Jiwen Lu},
-      journal={arXiv preprint arXiv:2507.11539},
-      year={2025}
-}
-```
