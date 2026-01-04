@@ -64,6 +64,7 @@ class Attention(nn.Module):
         self.prune_mode = os.getenv("KV_PRUNE_MODE", "XStreamVGGT") # XStreamVGGT / SlidingWindow / Random
         self.cache_size = int(os.getenv("KV_CACHE_SIZE", cache_size)) # cache max len
         self.pool_size = int(os.getenv("KV_POOL_SIZE", 16)) # pooling len
+        self.kv_quant = os.getenv("KV_QUANT_MODE", "KCVT")
         
 
 
@@ -209,6 +210,40 @@ class Attention(nn.Module):
                 v = torch.cat([past_v, v], dim=2)
                 # import pdb; pdb.set_trace()
             new_kv = (k, v)
+
+            if self.kv_quant:
+                preserve_tokens = 0
+                kvtc = self.kv_quant
+                k_bit = 4
+                v_bit = 4
+                gs = 64
+
+
+                # fake_quant
+                if k.shape[-1] == 64:
+                        k_before_quant = new_kv[0]
+                        v_before_quant = new_kv[1]
+
+                        print(f"kvtc={kvtc}")
+                        print(f"k_bit={k_bit}, v_bit={v_bit}")
+                        if kvtc == "KTVT":
+                            k_quant = fake_quant_preserve_tokens(k_before_quant, num_skip=preserve_tokens, skip_dim=-2,clip_ratio=1, bit=k_bit, quant_gs=gs)
+                            v_quant = fake_quant_preserve_tokens(v_before_quant, num_skip=preserve_tokens, skip_dim=-2, clip_ratio=1, bit=v_bit, quant_gs=gs)
+                        elif kvtc == "KCVT":
+                            k_quant = fake_quant_preserve_tokens(k_before_quant.transpose(-1,-2), num_skip=preserve_tokens, skip_dim=-1, clip_ratio=1, bit=k_bit, quant_gs=gs).transpose(-1,-2)
+                            v_quant = fake_quant_preserve_tokens(v_before_quant, num_skip=preserve_tokens, skip_dim=-2, clip_ratio=1, bit=v_bit, quant_gs=gs)  
+                        elif kvtc == "KTVC":
+                            k_quant = fake_quant_preserve_tokens(k_before_quant, num_skip=preserve_tokens, skip_dim=-2, clip_ratio=1, bit=k_bit, quant_gs=gs)
+                            v_quant = fake_quant_preserve_tokens(v_before_quant.transpose(-1,-2), num_skip=preserve_tokens, skip_dim=-1, clip_ratio=1, bit=v_bit, quant_gs=gs).transpose(-1,-2)                                           
+                        elif kvtc == "KCVC":
+                            k_quant = fake_quant_preserve_tokens(k_before_quant.transpose(-1,-2), num_skip=preserve_tokens, skip_dim=-1, clip_ratio=1, bit=k_bit, quant_gs=gs).transpose(-1,-2)
+                            v_quant = fake_quant_preserve_tokens(v_before_quant.transpose(-1,-2), num_skip=preserve_tokens, skip_dim=-1, clip_ratio=1, bit=v_bit, quant_gs=gs).transpose(-1,-2) 
+                        else:
+                            k_quant = k_before_quant
+                            v_quant = v_before_quant
+                        new_kv = (k_quant, v_quant)
+
+
         else:
             new_kv = None
         
@@ -256,3 +291,127 @@ class MemEffAttention(Attention):
         x = self.proj_drop(x)
 
         return x
+
+def find_params_groupwise_lastdim_safe(x, clip_ratio, bit, quant_gs):
+    """
+    Group-wise asymmetric quantization parameters (SAFE VERSION)
+
+    Args:
+        x: input tensor, shape (..., D)
+        clip_ratio: float > 0
+        bit: quantization bit-width
+        quant_gs: group size on last dimension
+
+    Returns:
+        scale: (..., D_pad)
+        zero:  (..., D_pad)
+        pad_len: int
+    """
+    *prefix, D = x.shape
+
+    # ---------- Pad last dim ----------
+    remainder = D % quant_gs
+    if remainder != 0:
+        pad_len = quant_gs - remainder
+        x = F.pad(x, (0, pad_len))
+        D_pad = D + pad_len
+    else:
+        pad_len = 0
+        D_pad = D
+
+    x_grouped = x.reshape(*prefix, D_pad // quant_gs, quant_gs)
+
+    # ---------- Min / Max ----------
+    clip_ratio = max(float(clip_ratio), 1e-6)
+
+    xmax = torch.amax(x_grouped, dim=-1, keepdim=True) * clip_ratio
+    xmin = torch.amin(x_grouped, dim=-1, keepdim=True) * clip_ratio
+
+    maxq = (1 << bit) - 1
+
+    # ---------- Scale (critical) ----------
+    if x.dtype in (torch.float16, torch.bfloat16):
+        eps = 1e-6
+    else:
+        eps = 1e-12
+
+    scale = (xmax - xmin) / maxq
+    scale = torch.clamp(scale, min=eps)
+
+    # ---------- Zero (critical) ----------
+    zero = torch.round(-xmin / scale)
+    zero = torch.nan_to_num(zero, nan=0.0, posinf=maxq, neginf=0.0)
+    zero = torch.clamp(zero, 0, maxq)
+
+    # ---------- Expand back ----------
+    scale = scale.repeat_interleave(quant_gs, dim=-1).reshape(*prefix, D_pad)
+    zero  = zero.repeat_interleave(quant_gs, dim=-1).reshape(*prefix, D_pad)
+
+    return scale, zero, pad_len
+
+
+def asym_quant_safe(x, scale, zero, bit):
+    """
+    Safe asymmetric quantization
+    """
+    maxq = (1 << bit) - 1
+    q = torch.round(x / scale) + zero
+    q = torch.nan_to_num(q, nan=0.0, posinf=maxq, neginf=0.0)
+    q = torch.clamp(q, 0, maxq)
+    return q
+
+
+def asym_dequant_safe(q, scale, zero):
+    """
+    Safe asymmetric dequantization
+    """
+    return scale * (q - zero)
+
+
+def fake_quant_safe(x, clip_ratio, bit, quant_gs):
+    """
+    Group-wise fake quantization (SAFE)
+    """
+    scale, zero, pad_len = find_params_groupwise_lastdim_safe(
+        x, clip_ratio, bit, quant_gs
+    )
+
+    # ---------- Pad x ----------
+    if pad_len > 0:
+        x_pad = F.pad(x, (0, pad_len))
+    else:
+        x_pad = x
+
+    q = asym_quant_safe(x_pad, scale, zero, bit)
+    deq = asym_dequant_safe(q, scale, zero)
+
+    # ---------- Remove pad ----------
+    if pad_len > 0:
+        deq = deq[..., :-pad_len]
+
+    return deq
+
+
+def fake_quant_preserve_tokens(
+    x, num_skip, skip_dim, clip_ratio, bit, quant_gs
+):
+    """
+    Skip first num_skip elements along skip_dim, quantize the rest (SAFE)
+    """
+    assert num_skip >= 0
+    D = x.shape[skip_dim]
+    assert num_skip <= D
+
+    idx_all = torch.arange(D, device=x.device)
+    idx_skip = idx_all[:num_skip]
+    idx_quant = idx_all[num_skip:]
+
+    x_skip = torch.index_select(x, dim=skip_dim, index=idx_skip)
+    x_quant = torch.index_select(x, dim=skip_dim, index=idx_quant)
+
+    x_quant_q = fake_quant_safe(
+        x_quant, clip_ratio, bit, quant_gs
+    )
+
+    x_out = torch.cat([x_skip, x_quant_q], dim=skip_dim)
+    return x_out
