@@ -115,7 +115,7 @@ bash eval/video_depth/run.sh
 To evaluate the version with **KV cache quantization**, please switch to the corresponding branch first:
 
 ```bash
-git checkout prune&fake_quant
+git checkout prune_and_quantize
 ```
 
 Then run:
