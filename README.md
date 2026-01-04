@@ -110,7 +110,7 @@ bash eval/video_depth/run.sh
 
 ---
 
-### KV Cache Pruning + Quantization
+### KV Cache Pruning with Simulated Quantization
 
 To evaluate the version with **KV cache quantization**, please switch to the corresponding branch first:
 
