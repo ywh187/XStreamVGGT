@@ -2,7 +2,7 @@
 <h1>XStreamVGGT: Extremely Memory-Efficient Streaming Vision Geometry Grounded Transformer with KV Cache Compression</h1>
 </div>
 
-### [Paper](https://arxiv.org/abs/0000.00000) | [Code](https://github.com/your-repo/XStreamVGGT)
+### [Paper](https://arxiv.org/abs/2601.01204) | [Code](https://github.com/your-repo/XStreamVGGT)
 
 > **XStreamVGGT: Extremely Memory-Efficient Streaming Vision Geometry Grounded Transformer with KV Cache Compression**
 
