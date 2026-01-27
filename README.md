@@ -4,7 +4,7 @@
 
 ## 🔔 News
 
-- **[2026.01]** 🚀📄 Published as a conference paper at **SID’s Display Week 2026**
+- **[2026.01]** 🚀📄 Published as a conference paper at **SID’s Display Week 2026** !!
 
 
 
