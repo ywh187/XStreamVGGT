@@ -2,7 +2,10 @@
 <h1>XStreamVGGT: Extremely Memory-Efficient Streaming Vision Geometry Grounded Transformer with KV Cache Compression</h1>
 </div>
 
-🚀🚀🚀 **Published as a conference paper at SID’s Display Week 2026!**
+## 🔔 News
+
+- **[2026.01]** 🚀📄 Published as a conference paper at **SID’s Display Week 2026**
+
 
 
 ### [Paper](https://arxiv.org/abs/2601.01204) | [Code](https://github.com/your-repo/XStreamVGGT)
